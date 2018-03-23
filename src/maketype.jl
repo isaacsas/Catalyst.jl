@@ -12,7 +12,7 @@ function maketype(name,
                   params = Symbol[],
                   pfuncs=Vector{Expr}(0),
                   symjac=Matrix{SymEngine.Basic}(0,0),
-                  mass_action_reactions=Vector{ReactionStruct}()
+                  reactions=Vector{ReactionStruct}()
                   )
 
     typeex = :(mutable struct $name <: AbstractReactionNetwork
@@ -28,7 +28,7 @@ function maketype(name,
         syms::Vector{Symbol}
         params::Vector{Symbol}
         symjac::Matrix{SymEngine.Basic}
-        mass_action_reactions::Vector{ReactionStruct}
+        reactions::Vector{ReactionStruct}
     end)
     # Make the default constructor
     constructorex = :($(name)(;
@@ -44,7 +44,7 @@ function maketype(name,
                   $(Expr(:kw,:syms,syms)),
                   $(Expr(:kw,:params,params)),
                   $(Expr(:kw,:symjac,symjac)),
-                  $(Expr(:kw,:mass_action_reactions,mass_action_reactions))) =
+                  $(Expr(:kw,:reactions,reactions))) =
                   $(name)(
                       f,
                       f_func,
@@ -58,7 +58,7 @@ function maketype(name,
                       syms,
                       params,
                       symjac,
-                      mass_action_reactions
+                      reactions
                       )) |> esc
 
                       #f_funcs,symfuncs,pfuncs,syms,symjac) |> esc
