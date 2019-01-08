@@ -71,58 +71,97 @@ no_mass_arrows = Set{Symbol}([:⇐, :⟽, :⇒, :⟾, :⇔, :⟺])      #Using t
 
 funcdict = Dict{Symbol, Function}()                             #Stores user defined functions.
 
+
+using TimerOutputs
+const to = TimerOutput()
 #Coordination function, actually does all the work of the macro.
 function coordinate(name, ex::Expr, p, scale_noise)
-    reactions = get_reactions(ex)           ::Vector{ReactionStruct}
-    reactants = get_reactants(reactions)    ::OrderedDict{Symbol,Int}
-    parameters = get_parameters(p)          ::OrderedDict{Symbol,Int}
 
-    syms = collect(keys(reactants))
-    params = collect(keys(parameters))
-    (in(:t,union(syms,params))) && error("t is reserved for the time variable and may neither be used as a reactant nor a parameter")
+    @timeit to "1" reactions = get_reactions(ex)           ::Vector{ReactionStruct}
+    @timeit to "2" reactants = get_reactants(reactions)    ::OrderedDict{Symbol,Int}
+    @timeit to "3" parameters = get_parameters(p)          ::OrderedDict{Symbol,Int}
 
-    update_reaction_info(reactions,syms)
+    @timeit to "4" syms = collect(keys(reactants))
+    @timeit to "5" params = collect(keys(parameters))
+    @timeit to "6" (in(:t,union(syms,params))) && error("t is reserved for the time variable and may neither be used as a reactant nor a parameter")
 
-    # f_expr = get_f(reactions, reactants)
-    # f = make_func(f_expr, reactants, parameters)
+    @timeit to "7" update_reaction_info(reactions,syms)
 
-    # g_expr = get_g(reactions, reactants, scale_noise)
-    # g = make_func(g_expr, reactants, parameters)
-    # p_matrix = zeros(length(reactants), length(reactions))
+    @timeit to "8" f_expr = get_f(reactions, reactants)
+    @timeit to "9" f = make_func(f_expr, reactants, parameters)
 
-    # (jump_rate_expr, jump_affect_expr, jumps, regular_jumps) = get_jumps(reactions, reactants, parameters)
+    @timeit to "10" g_expr = get_g(reactions, reactants, scale_noise)
+    @timeit to "11" g = make_func(g_expr, reactants, parameters)
+    @timeit to "12" p_matrix = zeros(length(reactants), length(reactions))
 
-    # f_rhs = [element.args[2] for element in f_expr]
-    # symjac = Expr(:quote, calculate_jac(deepcopy(f_rhs), syms))
-    # f_symfuncs = hcat([SymEngine.Basic(f) for f in f_rhs])
+    @timeit to "13" (jump_rate_expr, jump_affect_expr, jumps, regular_jumps) = get_jumps(reactions, reactants, parameters)
 
-    # # Build the type
-    exprs = Vector{Expr}(undef,0)
+    @timeit to "14" f_rhs = [element.args[2] for element in f_expr]
+    @timeit to "15" symjac = Expr(:quote, calculate_jac(deepcopy(f_rhs), syms))
+    @timeit to "16" f_symfuncs = hcat([SymEngine.Basic(f) for f in f_rhs])
 
-    # ## only get the right-hand-side of the equations.
-    # f_funcs = [element.args[2] for element in f_expr]
-    # g_funcs = [element.args[2] for element in g_expr]
+    # Build the type
+    @timeit to "17" exprs = Vector{Expr}(undef,0)
 
-    # typeex,constructorex = maketype(name, f, f_funcs, f_symfuncs, g, g_funcs, jumps, regular_jumps, Meta.quot(jump_rate_expr), Meta.quot(jump_affect_expr), p_matrix, syms; params=params, reactions=reactions, symjac=symjac)
-    typeex,constructorex = maketype(name, syms; params=params, reactions=reactions)
+    ## only get the right-hand-side of the equations.
+    @timeit to "18" f_funcs = [element.args[2] for element in f_expr]
+    @timeit to "19" g_funcs = [element.args[2] for element in g_expr]
 
-    push!(exprs,typeex)
-    push!(exprs,constructorex)
+    @timeit to "20" typeex,constructorex = maketype(name, f, f_funcs, f_symfuncs, g, g_funcs, jumps, regular_jumps, Meta.quot(jump_rate_expr), Meta.quot(jump_affect_expr), p_matrix, syms; params=params, reactions=reactions, symjac=symjac)
 
-    # ## Overload the type so that it can act as a function.
-    # overloadex = :(((f::$name))(du, u, p, t::Number) = f.f(du, u, p, t)) |> esc
-    # push!(exprs,overloadex)
+    @timeit to "21" push!(exprs,typeex)
+    @timeit to "22" push!(exprs,constructorex)
 
-    # ## Add a method which allocates the `du` and returns it instead of being inplace
-    # overloadex = :(((f::$name))(u,p,t::Number) = (du=similar(u); f(du,u,p,t); du)) |> esc
-    # push!(exprs,overloadex)
+    ## Overload the type so that it can act as a function.
+    @timeit to "23" overloadex = :(((f::$name))(du, u, p, t::Number) = f.f(du, u, p, t)) |> esc
+    @timeit to "24" push!(exprs,overloadex)
+
+    ## Add a method which allocates the `du` and returns it instead of being inplace
+    @timeit to "25" overloadex = :(((f::$name))(u,p,t::Number) = (du=similar(u); f(du,u,p,t); du)) |> esc
+    @timeit to "26" push!(exprs,overloadex)
 
     # export type constructor
-    def_const_ex = :(($name)()) |> esc
-    push!(exprs,def_const_ex)
+    @timeit to "27" def_const_ex = :(($name)()) |> esc
+    @timeit to "28" push!(exprs,def_const_ex)
 
-    expr_arr_to_block(exprs)
+    @timeit to "29" ex = expr_arr_to_block(exprs)
+
+    show(to)
+
+    ex
 end
+
+# using TimerOutputs
+# const to = TimerOutput()
+# function coordinate(name, ex::Expr, p, scale_noise)
+    
+#     println("here!")
+
+#     @timeit to "1" reactions = get_reactions(ex)           ::Vector{ReactionStruct}
+#     @timeit to "2" reactants = get_reactants(reactions)    ::OrderedDict{Symbol,Int}
+#     @timeit to "3" parameters = get_parameters(p)          ::OrderedDict{Symbol,Int}
+
+#     @timeit to "4" syms = collect(keys(reactants))
+#     @timeit to "5" params = collect(keys(parameters))
+#     @timeit to "6" (in(:t,union(syms,params))) && error("t is reserved for the time variable and may neither be used as a reactant nor a parameter")
+
+#     @timeit to "7" update_reaction_info(reactions,syms)
+
+#     # Build the type
+#     @timeit to "8" exprs = Vector{Expr}(undef,0)
+
+#     @timeit to "9" typeex,constructorex = maketype(name, syms; params=params, reactions=reactions)
+
+#     @timeit to "10" push!(exprs,typeex)
+#     @timeit to "11" push!(exprs,constructorex)
+
+#     @timeit to "12" def_const_ex = :(($name)()) |> esc
+#     @timeit to "13" push!(exprs,def_const_ex)
+
+#     @timeit to "14" expr_arr_to_block(exprs)
+
+#     show(to)
+# end
 
 #Generates a vector containing a number of reaction structures, each containing the infromation about one reaction.
 function get_reactions(ex::Expr)
