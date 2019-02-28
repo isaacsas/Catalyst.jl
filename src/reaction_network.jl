@@ -152,7 +152,8 @@ end
 # ODE expressions
 function genode_exprs(reactions, reactants, parameters, syms; build_jac=true,
                                                               build_symfuncs=true)
-    f_expr                = get_f(reactions, reactants)
+    f_expr,f2             = get_f(reactions, reactants)
+    foreach(println, f2[1:min(50,length(f2))])
     f                     = make_func(f_expr, reactants, parameters)
     f_rhs                 = [element.args[2] for element in f_expr]
     symjac, jac, paramjac = build_jac ? get_jacs(f_rhs, syms, reactants, parameters) : (nothing,nothing,nothing)
@@ -327,13 +328,29 @@ function get_f(reactions::Vector{ReactionStruct}, reactants::OrderedDict{Symbol,
     f = Vector{Expr}(undef,length(reactants))
     for i = 1:length(f)
         f[i] = :(internal_var___du[$i] = $(Expr(:call, :+)))
+
     end
+    
+    f2 = Vector{Expr}(undef,1)
+    f2[1] = :(internal_var___du .= zero(eltype(internal___var___u)))
+
     for reaction in deepcopy(reactions)
+        rate = reaction.rate_DE
+        push!(f2, :(internal_var___tmp = $rate))
         for reactant in union(getfield.(reaction.products, :reactant),getfield.(reaction.substrates, :reactant))
             push!(f[reactants[reactant]].args[2].args, recursive_clean!(:($(get_stoch_diff(reaction,reactant)) * $(reaction.rate_DE))))
+            
+            expr = recursive_clean!(:($(get_stoch_diff(reaction,reactant)) * internal_var___tmp))
+            if isa(expr, Expr) && (expr.args[1] == :(-))
+                push!(f2, :(internal_var___du[$(reactants[reactant])] = internal_var___du[$(reactants[reactant])] - $(expr.args[2])))
+            else
+                if !(isa(expr,Number) && iszero(expr))
+                    push!(f2, :(internal_var___du[$(reactants[reactant])] += $(expr)))
+                end
+            end
         end
     end
-    return f
+    return f,f2
 end
 
 #Produces an array of expressions. Each entry corresponds to a line in the function g, which constitutes the stochastic part of the system. Uses the Guillespie Approach for creating Langevin equations.  The Expressions can be used for debugging, making LaTex code, or creating the real f function for simulating the network.
