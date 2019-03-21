@@ -189,7 +189,8 @@ end
 function genode_exprs(reactions, reactants, parameters, syms; build_jac=true,
                                                               build_symfuncs=true)
     f_expr                = get_f(reactions, reactants)
-    f                     = make_func(f_expr, reactants, parameters)
+    f2_expr               = get_f2(reactions, reactants)
+    f                     = make_func(f2_expr, reactants, parameters)
     f_rhs                 = ExprValues[element.args[2] for element in f_expr]
     symjac, jac, paramjac = build_jac ? get_jacs(f_rhs, syms, reactants, parameters) : (nothing,nothing,nothing)
     f_symfuncs            = build_symfuncs ? hcat([SymEngine.Basic(f) for f in f_rhs]) : nothing
@@ -387,6 +388,44 @@ function get_f(reactions::Vector{ReactionStruct}, reactants::OrderedDict{Symbol,
 
     return f
 end
+
+function get_f2(reactions::Vector{ReactionStruct}, reactants::OrderedDict{Symbol,Int})
+    f = Vector{Expr}()
+    for i = 1:length(reactants)
+        push!(f, :(internal_var___du[$i] = zero(eltype(internal_var___du))))
+    end
+    sortv = Symbol[]
+    for reaction in deepcopy(reactions)        
+        ratelaw = recursive_clean!(reaction.rate_DE)
+        if !(ratelaw isa Number && iszero(ratelaw))            
+            empty!(sortv)
+            union!(sortv, getfield.(reaction.products, :reactant), getfield.(reaction.substrates, :reactant))
+            sort!(sortv)            
+            (length(sortv) > 1) && push!(f, :(tmp = $ratelaw))
+            for reactant in sortv
+                stochcoef = get_stoch_diff(reaction,reactant)
+                if stochcoef < zero(stochcoef)
+                    stochcoef = -stochcoef
+                    op = :(-=)
+                else
+                    op = :(+=)
+                end
+                
+                if length(sortv) == 1
+                    ex = recursive_clean!(:($stochcoef * $ratelaw))
+                    !(ex isa Number && iszero(ex)) && push!(f, Expr(op, :(internal_var___du[$(reactants[reactant])]), ex))
+                else
+                    ex = recursive_clean!(:($stochcoef * tmp))
+                    !(ex isa Number && iszero(ex)) && push!(f, Expr(op, :(internal_var___du[$(reactants[reactant])]), ex))
+                end
+            end
+        end
+    end
+    push!(f, :(return nothing))
+
+    return f
+end
+
 
 #Produces an array of expressions. Each entry corresponds to a line in the function g, which constitutes the stochastic part of the system. Uses the Guillespie Approach for creating Langevin equations.  The Expressions can be used for debugging, making LaTex code, or creating the real f function for simulating the network.
 function get_g(reactions::Vector{ReactionStruct}, reactants::OrderedDict{Symbol,Int}, scale_noise::Symbol)
