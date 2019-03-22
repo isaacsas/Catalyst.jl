@@ -333,6 +333,26 @@ function substratesymstoich(rn::DiffEqBase.AbstractReactionNetwork, rxidx)
     rn.reactions[rxidx].substrates
 end
 
+function substratestoich_sparsemat(rn::DiffEqBase.AbstractReactionNetwork)
+    I = Vector{Int}()      # species 
+    J = Vector{Int}()      # reactions
+    V = Vector{Int}()      # stoich coef
+
+    sm = speciesmap(rn)
+    for (j,rx) in enumerate(rn.reactions)
+        ps = substratesymstoich(rn, j)
+
+        for p in ps
+            push!(I, sm[p.reactant])
+            push!(J, j)
+            push!(V, p.stoichiometry)
+        end
+    end
+
+    sparse(I,J,V)
+end
+
+
 function productstoich(rs::ReactionStruct, specmap)
     sort( [specmap[p.reactant] => p.stoichiometry for p in rs.products] )    
 end
@@ -349,6 +369,26 @@ Allocates a new vector to store the pairs.
 function productstoich(rn::DiffEqBase.AbstractReactionNetwork, rxidx)
     productstoich(rn.reactions[rxidx], speciesmap(rn))
 end
+
+function productstoich_sparsemat(rn::DiffEqBase.AbstractReactionNetwork)
+    I = Vector{Int}()      # species 
+    J = Vector{Int}()      # reactions
+    V = Vector{Int}()      # stoich coef
+
+    sm = speciesmap(rn)
+    for (j,rx) in enumerate(rn.reactions)
+        ps = productsymstoich(rn, j)
+
+        for p in ps
+            push!(I, sm[p.reactant])
+            push!(J, j)
+            push!(V, p.stoichiometry)
+        end
+    end
+
+    sparse(I,J,V)
+end
+
 
 """
     productsymstoich(network, rxidx)
@@ -391,6 +431,12 @@ Allocates a new vector to store the pairs.
 """
 function netstoich(rn::DiffEqBase.AbstractReactionNetwork, rxidx)
     netstoich(rn.reactions[rxidx], speciesmap(rn))
+end
+
+
+function netstoich_sparsemat(rn::DiffEqBase.AbstractReactionNetwork; substoich=nothing)
+    ss = isnothing(substoich) ? substratestoich_sparsemat(rn) : substoich    
+    return (productstoich_sparsemat(rn) - ss)
 end
 
 """
