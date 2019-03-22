@@ -22,6 +22,7 @@ include("maketype.jl")
 include("network_properties.jl")
 include("massaction_jump_utils.jl")
 include("problem.jl")
+include("matrix_representation.jl")
 
 # reaction network macro
 export @reaction_network, @reaction_func, @min_reaction_network, @empty_reaction_network
@@ -41,5 +42,8 @@ export addodes!, addsdes!, addjumps!
 
 # problems that can be solved from the network
 export ODEProblem, SDEProblem, DiscreteProblem, JumpProblem, SteadyStateProblem
+
+# matrix representation of the network (mass action only currently)
+export MatrixNetwork, MatrixNetworkODEs
 
 end # module
