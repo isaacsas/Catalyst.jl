@@ -277,7 +277,12 @@ end
 #Calculates the rate used by ODEs and SDEs. If we want to use masskinetics we have to include substrate concentration, taking higher order terms into account.
 function mass_rate_DE(substrates::Vector{ReactantStruct}, use_mass_kin::Bool, old_rate::ExprValues)
     rate = Expr(:call, :*, old_rate)
-    use_mass_kin && foreach(sub -> push!(rate.args,:($(Expr(:call, :^, sub.reactant, sub.stoichiometry))/$(factorial(sub.stoichiometry)))), substrates)
+    # use_mass_kin && foreach(sub -> push!(rate.args,:($(Expr(:call, :^, sub.reactant, sub.stoichiometry))/$(factorial(sub.stoichiometry)))), substrates)    
+    if use_mass_kin && !isempty(substrates)
+        foreach(sub -> push!(rate.args,:($(Expr(:call, :^, sub.reactant, sub.stoichiometry)))), substrates)
+        coef = prod(s -> factorial(s.stoichiometry), substrates)
+        insert!(rate.args, 2, :(1/$coef))
+    end    
     return rate
 end
 
@@ -370,8 +375,18 @@ function get_f(reactions::Vector{ReactionStruct}, reactants::OrderedDict{Symbol,
         f[i] = :(internal_var___du[$i] = $(Expr(:call, :+)))
     end
     for reaction in deepcopy(reactions)
+
+        coef = mapreduce(s -> factorial(s.stoichiometry), *, reaction.substrates, init=one(Int))
+
         for reactant in union(getfield.(reaction.products, :reactant),getfield.(reaction.substrates, :reactant))
-            ex = recursive_clean!(:($(get_stoch_diff(reaction,reactant)) * $(reaction.rate_DE)))
+            ex = copy(reaction.rate_DE)
+            #println(ex)
+            ex.args[2] = :($(get_stoch_diff(reaction,reactant)) / $coef)
+            #println("  ", ex.args[2])
+            #println(ex)
+            ex = recursive_clean!(ex)
+            #println(ex, "\n")            
+            #ex = recursive_clean!(:($(get_stoch_diff(reaction,reactant)) * $(reaction.rate_DE)))
             !(ex isa Number && iszero(ex)) && push!(f[reactants[reactant]].args[2].args, ex)
         end
     end
