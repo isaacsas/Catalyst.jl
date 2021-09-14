@@ -1,4 +1,5 @@
 using Catalyst, LinearAlgebra, DiffEqJump, Test
+const MT = ModelingToolkit
 
 @parameters t k[1:20]
 @variables A(t) B(t) C(t) D(t)
@@ -44,11 +45,11 @@ sdesys = convert(SDESystem,rs)
 js = convert(JumpSystem,rs)
 nlsys = convert(NonlinearSystem,rs)
 
-@test ModelingToolkit.get_defaults(rs) ==
-       ModelingToolkit.get_defaults(odesys) ==
-       ModelingToolkit.get_defaults(sdesys) ==
-       ModelingToolkit.get_defaults(js) ==
-       ModelingToolkit.get_defaults(nlsys) ==
+@test MT.get_defaults(rs) ==
+       MT.get_defaults(odesys) ==
+       MT.get_defaults(sdesys) ==
+       MT.get_defaults(js) ==
+       MT.get_defaults(nlsys) ==
        defs
 
 u0map = [A=>5.] # was 0.5
@@ -191,8 +192,8 @@ jumps[19] = VariableRateJump((u,p,t) -> p[19]*u[1]*t, integrator -> (integrator.
 jumps[20] = VariableRateJump((u,p,t) -> p[20]*t*u[1]*binomial(u[2],2)*u[3], integrator -> (integrator.u[2] -= 2; integrator.u[3] -= 1; integrator.u[4] += 2))
 
 statetoid = Dict(state => i for (i,state) in enumerate(states(js)))
-jspmapper = ModelingToolkit.JumpSysMajParamMapper(js, pars)
-symmaj = ModelingToolkit.assemble_maj(equations(js).x[1], statetoid, jspmapper)
+jspmapper = MT.JumpSysMajParamMapper(js, pars)
+symmaj = MT.assemble_maj(equations(js).x[1], statetoid, jspmapper)
 maj    = MassActionJump(symmaj.param_mapper(pars), symmaj.reactant_stoch, symmaj.net_stoch, symmaj.param_mapper, scale_rates=false)
 for i in midxs  
   @test abs(jumps[i].scaled_rates - maj.scaled_rates[i]) < 100*eps()
@@ -200,7 +201,7 @@ for i in midxs
   @test jumps[i].net_stoch == maj.net_stoch[i]
 end
 for i in cidxs
-  crj = ModelingToolkit.assemble_crj(js, equations(js)[i], statetoid)
+  crj = MT.assemble_crj(js, equations(js)[i], statetoid)
   @test isapprox(crj.rate(u0,p,ttt), jumps[i].rate(u0,p,ttt))
   fake_integrator1 = (u=zeros(4),p=p,t=0); fake_integrator2 = deepcopy(fake_integrator1);
   crj.affect!(fake_integrator1);
@@ -208,7 +209,7 @@ for i in cidxs
   @test fake_integrator1 == fake_integrator2
 end
 for i in vidxs
-  crj = ModelingToolkit.assemble_vrj(js, equations(js)[i], statetoid)
+  crj = MT.assemble_vrj(js, equations(js)[i], statetoid)
   @test isapprox(crj.rate(u0,p,ttt), jumps[i].rate(u0,p,ttt))
   fake_integrator1 = (u=zeros(4),p=p,t=0.); fake_integrator2 = deepcopy(fake_integrator1);
   crj.affect!(fake_integrator1); jumps[i].affect!(fake_integrator2);
@@ -272,3 +273,31 @@ js = convert(JumpSystem, rs)
 @test isequal2(equations(js)[1].scaled_rates, k1/12)
 js = convert(JumpSystem,rs; combinatoric_ratelaws=false)
 @test isequal2(equations(js)[1].scaled_rates, k1)
+
+
+# test for having algebraic constraint equations
+@parameters t, r₊, r₋, β
+@variables A(t), B(t), C(t), D(t)
+rxs = [Reaction(r₊, [A,B], [C]),
+       Reaction(r₋, [C], [A,B])]
+aeqs = [D ~ 2*A + β*B]
+@named ns = NonlinearSystem(aeqs, [A,B,D], [β])
+@named rs = ReactionSystem(rxs, t, [A,B,C], [r₊, r₋]; constraints=ns)
+osys = convert(ODESystem, rs; include_zero_odes=false)
+p  = [r₊ => 1.0, r₋ => 2.0, β => 3.0]
+u₀ = [1.0, 2.0, 0.0]
+oprob = ODEProblem(structural_simplify(osys), u₀, (0.0,10.0), p)
+sol = solve(oprob, Tsit5())
+@test isapprox(0, norm(sol[D] .- 2*sol[A] - 3*sol[B]), atol=(100*eps()))
+
+A = MT.ParentScope(A)
+B = MT.ParentScope(B)
+nseqs = [D ~ 2A + β*B]
+@named ns = ODESystem(nseqs, t, [A,B,D], [β])
+@named rs = ReactionSystem(rxs, t, [A,B,C], [r₊, r₋], systems=[ns])
+osys = convert(ODESystem, rs; include_zero_odes=false)
+p  = [r₊ => 1.0, r₋ => 2.0, β => 3.0]
+u₀ = [1.0, 2.0, 0.0]
+oprob = ODEProblem(structural_simplify(osys), u₀, (0.0,10.0), p)
+sol = solve(oprob, Tsit5())
+@test isapprox(0, norm(sol[ns₊D] .- 2*sol[A] - 3*sol[B]), atol=(100*eps()))

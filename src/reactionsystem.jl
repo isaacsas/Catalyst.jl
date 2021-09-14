@@ -185,8 +185,11 @@ struct ReactionSystem <: ModelingToolkit.AbstractTimeDependentSystem
     defaults::Dict
     """Type of the system"""
     connection_type::Any
+    """A [`NonlinearSystem`] that imposes constraints on species."""
+    constraints::Union{Nothing,ModelingToolkit.AbstractSystem}
 
-    function ReactionSystem(eqs, iv, states, ps, observed, name, systems, defaults, connection_type; checks::Bool = true)
+    function ReactionSystem(eqs, iv, states, ps, observed, name, systems, defaults, connection_type; 
+                            checks::Bool = true, constraints=nothing)
 
         iv′ = value(iv)
         states′ = value.(states)
@@ -197,7 +200,7 @@ struct ReactionSystem <: ModelingToolkit.AbstractTimeDependentSystem
             check_parameters(ps′, iv′)
             # check_units(eqs)    # disable as check the newly generated system below
         end
-        rs = new(collect(eqs), iv′, states′, ps′, observed, name, systems, defaults, connection_type)
+        rs = new(collect(eqs), iv′, states′, ps′, observed, name, systems, defaults, connection_type, constraints)
         checks && validate(rs)
 
         rs
@@ -212,14 +215,39 @@ function ReactionSystem(eqs, iv, species, params;
                         default_p=Dict(),
                         defaults=_merge(Dict(default_u0), Dict(default_p)),
                         connection_type=nothing,
-                        checks = true)
+                        checks = true, 
+                        constraints=nothing)
     name === nothing && throw(ArgumentError("The `name` keyword must be provided. Please consider using the `@named` macro"))
 
-    ReactionSystem(eqs, iv, species, params, observed, name, systems, defaults, connection_type, checks = checks)
+    ReactionSystem(eqs, iv, species, params, observed, name, systems, defaults, connection_type; 
+                   checks = checks, constraints=constraints)
 end
 
 function ReactionSystem(iv; kwargs...)
     ReactionSystem(Reaction[], iv, [], []; kwargs...)
+end
+
+function ModelingToolkit.equations(sys::ReactionSystem)
+    eqs = get_eqs(sys)
+    systems = get_systems(sys)
+    if isempty(systems)
+        return eqs
+    else
+        eqs = Any[eqs;
+               reduce(vcat,
+                      ModelingToolkit.namespace_equations.(get_systems(sys));
+                      init=Any[])]
+        return eqs
+    end
+end
+
+function hasconstraints(rs::ReactionSystem)
+    rs.constraints !== nothing
+end
+
+function addconstraints!(rs::ReactionSystem, constraints::NonlinearSystem)
+    rs.constraints = constraints
+    nothing
 end
 
 """
@@ -438,6 +466,28 @@ function assemble_jumps(rs; combinatoric_ratelaws=true)
     vcat(meqs,ceqs,veqs)
 end
 
+
+"""
+    addconstraints_toeqs!(eqs::AbstractVector, sys::ReactionSystem)   
+
+Merge the contraint system into the specified reaction system. Modifies the
+given equations by adding appending constraint equations, and generates a
+combined set of states and parameters for the merged system.
+"""
+function addconstraints_toeqs!(eqs::AbstractVector, sys::ReactionSystem)   
+    if hasconstraints(sys)
+        append!(eqs, get_eqs(sys.constraints))
+        sts  = union(get_states(sys), get_states(sys.constraints))
+        ps   = union(get_ps(sys), get_ps(sys.constraints))
+        defs = merge(get_defaults(sys), get_defaults(sys.constraints))    
+    else
+        sts  = get_states(sys)
+        ps   = get_ps(sys)
+        defs = get_defaults(sys)    
+    end
+    sts,ps,defs
+end
+
 """
 ```julia
 Base.convert(::Type{<:ODESystem},rs::ReactionSystem)
@@ -453,11 +503,11 @@ ignored.
 function Base.convert(::Type{<:ODESystem}, rs::ReactionSystem; 
                       name=nameof(rs), combinatoric_ratelaws=true, include_zero_odes=true, 
                       checks=false, kwargs...)
-    eqs     = assemble_drift(rs; combinatoric_ratelaws=combinatoric_ratelaws, 
-                                 include_zero_odes=include_zero_odes)
+    eqs = assemble_drift(rs; combinatoric_ratelaws=combinatoric_ratelaws, 
+                             include_zero_odes=include_zero_odes)
     systems = map(sys -> (sys isa ODESystem) ? sys : convert(ODESystem, sys), get_systems(rs))
-    ODESystem(eqs, get_iv(rs), get_states(rs), get_ps(rs); name=name, systems=systems, 
-              defaults=get_defaults(rs), checks=checks, kwargs...)
+    sts,ps,defs = addconstraints_toeqs!(eqs, rs)
+    ODESystem(eqs, get_iv(rs), sts, ps; name=name, systems=systems, defaults=defs, checks=checks, kwargs...)
 end
 
 """
@@ -479,8 +529,8 @@ function Base.convert(::Type{<:NonlinearSystem},rs::ReactionSystem;
     eqs     = assemble_drift(rs; combinatoric_ratelaws=combinatoric_ratelaws, as_odes=false, 
                                  include_zero_odes=include_zero_odes)
     systems = convert.(NonlinearSystem, get_systems(rs))
-    NonlinearSystem(eqs, get_states(rs), get_ps(rs); name=name, systems=systems, 
-                    defaults=get_defaults(rs), checks = checks, kwargs...)
+    sts,ps,defs = addconstraints_toeqs!(eqs, rs)
+    NonlinearSystem(eqs, sts, ps; name=name, systems=systems, defaults=defs, checks=checks, kwargs...)
 end
 
 """
@@ -524,11 +574,13 @@ function Base.convert(::Type{<:SDESystem}, rs::ReactionSystem;
     noiseeqs = assemble_diffusion(rs,noise_scaling;
                                   combinatoric_ratelaws=combinatoric_ratelaws)
     systems  = convert.(SDESystem, get_systems(rs))
-    SDESystem(eqs, noiseeqs, get_iv(rs), get_states(rs),
-              (noise_scaling===nothing) ? get_ps(rs) : union(get_ps(rs), toparam(noise_scaling));
+
+    sts,ps,defs = addconstraints_toeqs!(eqs, rs)
+    SDESystem(eqs, noiseeqs, get_iv(rs), sts, 
+              (noise_scaling===nothing) ? ps : union(ps, toparam(noise_scaling));    
               name=name, 
               systems=systems,
-              defaults=get_defaults(rs),
+              defaults=defs,
               checks = checks,
               kwargs...)
 end
@@ -550,6 +602,7 @@ function Base.convert(::Type{<:JumpSystem},rs::ReactionSystem;
                       name=nameof(rs), combinatoric_ratelaws=true, checks = false, kwargs...)
     eqs     = assemble_jumps(rs; combinatoric_ratelaws=combinatoric_ratelaws)
     systems = convert.(JumpSystem, get_systems(rs))
+    (rs.constraints !== nothing) && error("Error, JumpSystems do not currently support coupled constraint equations.")
     JumpSystem(eqs, get_iv(rs), get_states(rs), get_ps(rs); name=name, systems=systems, 
                defaults=get_defaults(rs), checks = checks, kwargs...)
 end
