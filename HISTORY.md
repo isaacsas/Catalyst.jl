@@ -8,11 +8,17 @@
   subsystems it is not currently possible to convert to a `JumpSystem`. It is
   also not possible to include either `SDESystem`s or `JumpSystems` as
   subsystems.
-- Depreciated `merge`, use `ModelingToolkit.extend` instead.
-- Depreciated `params` and `numparams` (use `ModelingToolkit.parameters` to get
-  all parameters of a system and all subsystems, or use `reactionparams` to get
-  all parameters of a system and all `ReactionSystem` subsystems. The latter
-  correspond to those parameters used within `Reaction`s.)
+- *BREAKING* `species` and `reactions` now return the corresponding variables
+  from a given `ReactionSystem`, and all sub-systems of it that are also
+  `ReactionSystem`s. Use `states` and `equations` to get information from the
+  base `ReactionSystem` and *all* sub-systems (even non-`ReactionSystem`s). See
+  the docs for more info.
+- *BREAKING* Depreciated `merge`, use `ModelingToolkit.extend` instead.
+- *BREAKING* Depreciated `params` and `numparams` (use
+  `ModelingToolkit.parameters` to get all parameters of a system and all
+  subsystems, or use `reactionparams` to get all parameters of a system and all
+  `ReactionSystem` subsystems. The latter correspond to those parameters used
+  within `Reaction`s.)
 
 ## Catalyst 9.0
 *1.* **BREAKING:** `netstoichmat`, `prodstoichmat` and `substoichmat` are now
