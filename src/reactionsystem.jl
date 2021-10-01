@@ -794,9 +794,6 @@ function flatten(rs::ReactionSystem)
     if csys === nothing
         newcsys = ODESystem(ceqs, get_iv(rs), csts, cps; name=nameof(rs))
     else
-        union!(csts, get_states(csys))
-        union!(cps, get_ps(csys))
-        append!(ceqs, get_eqs(csys))
         T = SciMLBase.parameterless_type(csys)
         newcsys = (T <: MT.AbstractTimeDependentSystem) ? 
                     T(ceqs, get_iv(csys), csts, cps; name=nameof(csys)) :

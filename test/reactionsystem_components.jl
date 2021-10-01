@@ -212,6 +212,12 @@ rn2 = extend(osys,rn)
 rnodes = convert(ODESystem,rn2)
 @test_throws ErrorException convert(NonlinearSystem,rn2)
 
+@variables G(t)
+eqs = [D(G) ~ -G]
+@named osys2 = ODESystem(eqs,t)
+rn3 = compose(rn2, osys2)
+@test length(equations(rn3)) == 5
+
 # check conversions work with algebraic constraints
 eqs = [0 ~ -a*A + C, 0 ~ -b*C + a*A]
 @named nlsys = NonlinearSystem(eqs,[A,C],[a,b])
