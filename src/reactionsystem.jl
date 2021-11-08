@@ -588,8 +588,8 @@ function Base.convert(::Type{<:ODESystem}, rs::ReactionSystem;
     eqs = assemble_drift(fullrs; combinatoric_ratelaws=combinatoric_ratelaws, 
                              include_zero_odes=include_zero_odes)                                 
     eqs,sts,ps = addconstraints!(eqs, fullrs)
-    ODESystem(eqs, get_iv(fullrs), sts, ps; name=name, defaults=get_defaults(fullrs), 
-                                            checks=checks, kwargs...)
+    ODESystem(eqs, get_iv(fullrs), sts, ps; name=name, observed=get_observed(fullrs), 
+                                            defaults=get_defaults(fullrs), checks=checks, kwargs...)
 end
 
 """
@@ -613,8 +613,8 @@ function Base.convert(::Type{<:NonlinearSystem}, rs::ReactionSystem;
                                  include_zero_odes=include_zero_odes)
     error_if_constraint_odes(NonlinearSystem, fullrs)
     eqs,sts,ps = addconstraints!(eqs, fullrs)
-    NonlinearSystem(eqs, sts, ps; name=name, defaults=get_defaults(fullrs), 
-                                  checks = checks, kwargs...)
+    NonlinearSystem(eqs, sts, ps; name=name, observed=get_observed(fullrs), 
+                                  defaults=get_defaults(fullrs), checks = checks, kwargs...)
 end
 
 """
@@ -663,6 +663,7 @@ function Base.convert(::Type{<:SDESystem}, rs::ReactionSystem;
     SDESystem(eqs, noiseeqs, get_iv(flatrs), get_states(flatrs),
               (noise_scaling===nothing) ? get_ps(flatrs) : union(get_ps(flatrs), toparam(noise_scaling));
               name=name, 
+              observed=get_observed(fullrs), 
               defaults=get_defaults(flatrs),
               checks = checks,
               kwargs...)
@@ -689,7 +690,7 @@ function Base.convert(::Type{<:JumpSystem},rs::ReactionSystem;
 
     eqs = assemble_jumps(flatrs; combinatoric_ratelaws=combinatoric_ratelaws)
     JumpSystem(eqs, get_iv(flatrs), get_states(flatrs), get_ps(flatrs); name=name, 
-               defaults=get_defaults(flatrs), checks = checks, kwargs...)
+               observed=get_observed(fullrs), defaults=get_defaults(flatrs), checks = checks, kwargs...)
 end
 
 

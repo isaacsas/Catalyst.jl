@@ -1019,6 +1019,29 @@ function Base.merge!(network1::ReactionSystem, network2::ReactionSystem)
     network1
 end
 
+bracket(s::Num) = bracket(MT.value(s))
+
+function bracket(s)     
+    if MT.istree(s)
+        op = MT.operation(s)
+        args = MT.arguments(s)
+        (length(args) == 1) || error("Unable to indentify a unique scalar independent variable.")
+        ssym = Symbol("⟦", Symbol(op), "⟧")
+        return (@variables $ssym(t))[1]
+    else
+        ssym = Symbol("⟦", Symbol(s), "⟧")
+        return (@variables $ssym)[1] 
+    end
+end
+
+function addconcentrations(rn, vol, specs=species(rn))
+    obs = get_observed(rn)
+    t   = get_iv(rn)
+    for s in specs        
+        push!(obs, Equation(bracket(s), s/vol))
+    end
+    nothing
+end
 
 ###############################   units   #####################################
 
