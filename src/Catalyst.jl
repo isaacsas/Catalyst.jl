@@ -13,6 +13,9 @@ using ModelingToolkit; const MT = ModelingToolkit
 using Symbolics
 using ModelingToolkit: Symbolic, value, istree, get_states, get_ps, get_iv, get_systems,
                        get_eqs, get_defaults, toparam, get_var_to_name, get_observed, getvar
+using Graphviz_jll
+
+
 import ModelingToolkit: get_variables, namespace_expr, namespace_equation, get_variables!,
                         modified_states!, validate, namespace_variables, namespace_parameters,
                         rename, renamespace, getname, flatten
@@ -28,17 +31,17 @@ import Parameters: @with_kw_noshow
 const DEFAULT_IV = (@parameters t)[1]
 
 # as used in Catlab
-const USE_GV_JLL = Ref(false)
-function __init__()
-    @require Graphviz_jll="3c863552-8265-54e4-a6dc-903eb78fde85" begin
-      USE_GV_JLL[] = true
-      let cfg = joinpath(Graphviz_jll.artifact_dir, "lib", "graphviz", "config6")
-        if !isfile(cfg)
-          Graphviz_jll.dot(path -> run(`$path -c`))
-        end
-      end
-    end
-  end
+# const USE_GV_JLL = Ref(false)
+# function __init__()
+#     @require Graphviz_jll="3c863552-8265-54e4-a6dc-903eb78fde85" begin
+#       USE_GV_JLL[] = true
+#       let cfg = joinpath(Graphviz_jll.artifact_dir, "lib", "graphviz", "config6")
+#         if !isfile(cfg)
+#           Graphviz_jll.dot(path -> run(`$path -c`))
+#         end
+#       end
+#     end
+#   end
 
 # base system type and features
 include("reactionsystem.jl")

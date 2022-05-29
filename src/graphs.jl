@@ -1,7 +1,7 @@
 #######################################################################
 # Contains code from  Catlab.jl:
 # https://raw.githubusercontent.com/AlgebraicJulia/Catlab.jl/master/src/graphics/Graphviz.jl
-# 
+#
 # That license for that code is:
 #
 # The MIT License
@@ -135,18 +135,18 @@ function run_graphviz(io::IO, graph::Graph; prog::Union{String,Nothing}=nothing,
     prog = graph.prog
   end
   @assert prog in ("dot", "neato", "fdp", "sfdp", "twopi", "circo")
-  if USE_GV_JLL[]
+#   if USE_GV_JLL[]
     fun = getfield(Graphviz_jll, Symbol(prog))
-    fun() do exe 
+    fun() do exe
       open(`$exe -T$format`, io, write=true) do gv
         pprint(gv, graph)
       end
     end
-  else
-    open(`$prog -T$format`, io, write=true) do gv
-      pprint(gv, graph)
-    end
-  end
+#   else
+#     open(`$prog -T$format`, io, write=true) do gv
+#       pprint(gv, graph)
+#     end
+#   end
 end
 function run_graphviz(graph::Graph; kw...)
   io = IOBuffer()
@@ -266,7 +266,7 @@ const edge_attrs  = Attributes(:splines => "splines")
 
 function edgify(δ, i, reverse::Bool)
     attr = Attributes()
-    return map(δ) do p        
+    return map(δ) do p
         val = String(p[1].f.name)
       weight = "$(p[2])"
       attr = Attributes(:label => weight, :labelfontsize => "6")
@@ -279,7 +279,7 @@ end
 function edgifyrates(rxs, specs)
     es = Edge[]
     for (i, rx) in enumerate(rxs)
-        deps = rx.rate isa Number ? Any[] : get_variables(rx.rate, specs) 
+        deps = rx.rate isa Number ? Any[] : get_variables(rx.rate, specs)
         for dep in deps
             val = String(dep.f.name)
             attr = Attributes(:color => "#d91111", :style => "dashed")
@@ -316,7 +316,7 @@ end
     complexgraph(rn::ReactionSystem; complexdata=reactioncomplexes(rn))
 
 Creates a Graphviz graph of the [`ReactionComplex`](@ref)s in `rn`. Reactions
-correspond to arrows and reaction complexes to blue circles. 
+correspond to arrows and reaction complexes to blue circles.
 
 Notes:
 - Black arrows from complexes to complexes indicate reactions whose rate is a
@@ -344,7 +344,7 @@ function complexgraph(rn::ReactionSystem; complexdata=reactioncomplexes(rn))
         prodcomp = newstrcomp[argmax(@view B[:,i])]
         deps = get_variables(r.rate, specs)
         if deps != Any[]
-            attr = Attributes(:color => "#d91111", :style => "dashed")   
+            attr = Attributes(:color => "#d91111", :style => "dashed")
             push!(edges, edgifycomplex(zip([subcomp],[prodcomp]),attr))
         else
             attr = Attributes()
@@ -357,7 +357,7 @@ function complexgraph(rn::ReactionSystem; complexdata=reactioncomplexes(rn))
     g = Digraph("G", stmts2; graph_attrs=graph_attrs, node_attrs=node_attrs,edge_attrs=edge_attrs)
     return g
 end
-    
+
 """
     Graph(rn::ReactionSystem)
 
