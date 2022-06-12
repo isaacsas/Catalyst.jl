@@ -693,6 +693,10 @@ function oderatelaw(rx; combinatoric_ratelaw=true)
     rl
 end
 
+function const_sts_to_params(rl)
+
+end
+
 function assemble_oderhs(rs, sts; combinatoric_ratelaws=true, remove_conserved=false)
     nps = get_networkproperties(rs)
     species_to_idx = Dict(x => i for (i,x) in enumerate(sts))
@@ -703,15 +707,32 @@ function assemble_oderhs(rs, sts; combinatoric_ratelaws=true, remove_conserved=f
         Dict()
     end
 
+    # setup substitution map to turn constant states to parameters
+    hasconststs = any(isconstant, get_states(rs))
+    csts_submap = if hasconststs
+        csts = filter(isconstant, get_states(rs))
+        Dict(p[1] => p[2] for p in zip(csts, map(MT.toparam, csts)))
+    else
+        Dict()
+    end
+
+    # NOTE, order matters here: we keep the constant species to parameter mapping and not
+    # the conservation law substitution with this order
+    submap = merge(depspec_submap, csts_submap)
+
     for rx in get_eqs(rs)
         rl = oderatelaw(rx; combinatoric_ratelaw=combinatoric_ratelaws)
-        remove_conserved && (rl = substitute(rl, depspec_submap))
+        (hasconststs || remove_conserved) && (rl = substitute(rl, submap))
+
         for (spec,stoich) in rx.netstoich
             # dependent species don't get an ODE, so are skipped
             remove_conserved && (spec in nps.depspecs) && continue
 
             # constant or BC species also do not get equations
             drop_dynamics(spec) && continue
+
+            # convert constant species in stoichiometry to parameters
+            (stoich isa Symbolics.Symbolic) && (stoich = substitute(stoich, csts_submap))
 
             i = species_to_idx[spec]
             if _iszero(rhsvec[i])
