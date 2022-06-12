@@ -24,6 +24,18 @@ function isbc(s)
     MT.getmetadata(s, VariableBCSpecies, false)
 end
 
+"""
+    Catalyst.ispurebc(s)
+
+Tests if the given symbolic variable corresponds to a boundary condition species that is not
+constant.
+"""
+ispurebc(s::Num) = ispurebc(MT.value(s))
+function ispurebc(s)
+    (!isconstant(s)) && MT.getmetadata(s, VariableBCSpecies, false)
+end
+
+
 # true for species for which shouldn't change from the reactions
 drop_dynamics(s) = isconstant(s) || isbc(s)
 
@@ -738,7 +750,7 @@ end
 function assemble_diffusion(rs, sts, noise_scaling; combinatoric_ratelaws=true,
                                                     remove_conserved=false)
     # as BC species should ultimately get an equation, we include them in the noise matrix
-    num_bcsts = count(isbc, get_states(rs))
+    num_bcsts = count(ispurebc, get_states(rs))
     eqs  = Matrix{Any}(undef, length(sts) + num_bcsts, length(get_eqs(rs)))
     eqs .= 0
     species_to_idx = Dict((x => i for (i,x) in enumerate(sts)))
@@ -955,16 +967,24 @@ end
 #     systems
 # end
 
+function merge_const_sts(ps, sts)
+    cps = map(MT.toparam, filter(isconstant, sts))
+    vcat(ps, cps)
+end
+
 # merge constraint components with the ReactionSystem components
 # also handles removing BC and constant species
 function addconstraints!(eqs, rs::ReactionSystem, ists; remove_conserved=false)
-    # if there are BC species, put them after the independent species
+    # if there are non-constant BC species, put them after the independent species
     rssts = get_states(rs)
-    sts = any(isbc, rssts) ? vcat(ists, filter(isbc, rssts)) : ists
+    sts = any(ispurebc, rssts) ? vcat(ists, filter(ispurebc, rssts)) : ists
 
     # if there are constant species, make them parameters
-    hasconstspec = any(isconstant, get_states(rs))
-    ps = hasconstspec ? vcat(get_ps(rs), filter(isconstant, get_states(rs))) : get_ps(rs)
+    ps = if any(isconstant, get_states(rs))
+        merge_const_sts(get_ps(rs), get_states(rs))
+    else
+        get_ps(rs)
+    end
 
     # make dependent species observables and add conservation constants as parameters
     if remove_conserved
@@ -996,8 +1016,16 @@ function addconstraints!(eqs, rs::ReactionSystem, ists; remove_conserved=false)
                   ODESystem or NonlinearSystem.
                   """
         end
-        sts = unique(vcat(sts, get_states(csys)))
-        ps = unique(vcat(ps, get_ps(csys)))
+        # merge in states of csys that aren't constant
+        sts = unique!(vcat(sts, filter(ispurebc, get_states(csys))))
+
+        # merge constant species that are only in the constraints into parameters
+        ps = vcat(ps, get_ps(csys))
+        ps = if any(isconstant, get_states(csys))
+            unique!(merge_const_sts(ps, get_states(csys)))
+        else
+            unique!(ps)
+        end
         ceqs = get_eqs(csys)
         (!isempty(ceqs)) && append!(eqs,ceqs)
         defs = merge(defs, MT.defaults(csys))
@@ -1137,10 +1165,10 @@ function Base.convert(::Type{<:SDESystem}, rs::ReactionSystem;
     eqs,sts,ps,obs,defs = addconstraints!(eqs, flatrs, ists; remove_conserved)
     ps = (noise_scaling===nothing) ? ps : vcat(ps,toparam(noise_scaling))
 
-    if any(isbc, get_states(flatrs))
-        @info """Boundary condition species detected. As constraints are not supported when
-        converting to SDESystems, the resulting system will be undetermined. Consider using
-        constant species instead."""
+    if any(ispurebc, get_states(flatrs))
+        @info """Non-constant boundary condition species detected. As constraints are not
+        supported when converting to SDESystems, the resulting system will be undetermined.
+        Consider using constant species instead."""
     end
 
     SDESystem(eqs, noiseeqs, get_iv(flatrs), sts, ps; name, defaults=defs,
@@ -1172,8 +1200,12 @@ function Base.convert(::Type{<:JumpSystem},rs::ReactionSystem;
 
     # handle constant and BC species
     sts = get_indep_sts(flatrs)
-    sts = vcat(sts, filter(isbc, get_states(flatrs)))
-    ps = vcat(get_ps(flatrs), filter(isconstant, get_states(flatrs)))
+    sts = vcat(sts, filter(ispurebc, get_states(flatrs)))
+    ps = if any(isconstant, get_states(flatrs))
+        merge_const_sts(get_ps(flatrs), get_states(flatrs))
+    else
+        get_ps(flatrs)
+    end
 
     JumpSystem(eqs, get_iv(flatrs), sts, ps; name, defaults=MT.defaults(flatrs),
                                             observed=MT.observed(flatrs), checks, kwargs...)
