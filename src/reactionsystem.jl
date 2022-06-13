@@ -160,12 +160,13 @@ function print_rxside(io::IO, specs, stoich)
         print(io, "∅")
     else
         for (i,spec) in enumerate(specs)
+            prspec = MT.isparameter(spec) ? spec : MT.operation(spec)
             if isequal(stoich[i],one(stoich[i]))
-                print(io, ModelingToolkit.operation(spec))
+                print(io, prspec)
             elseif Symbolics.istree(stoich[i])
-                print(io, "(", stoich[i], ")*", ModelingToolkit.operation(spec))
+                print(io, "(", stoich[i], ")*", prspec)
             else
-                print(io, stoich[i], "*", ModelingToolkit.operation(spec))
+                print(io, stoich[i], "*", prspec)
             end
 
             (i < length(specs)) && print(io, " + ")
@@ -650,6 +651,20 @@ function get_indep_sts(rs::ReactionSystem, remove_conserved=false)
     indepsts
 end
 
+# Test if there are any constant states, and if so return their representation as parameters
+# and a dict mapping their variable representation to their parameter representation.
+function get_const_sts(rs::ReactionSystem)
+    hasconststs = any(isconstant, get_states(rs))
+    if hasconststs
+        csts = Iterators.filter(isconstant, get_states(rs))
+        csts_ps = Iterators.map(MT.toparam, csts)
+        csts_submap = Dict(p[1] => p[2] for p in zip(csts, csts_ps))
+    else
+        csts_submap = Dict()
+    end
+    hasconststs, csts_submap
+end
+
 ######################## Conversion to ODEs/SDEs/jump, etc ##############################
 
 """
@@ -732,7 +747,9 @@ function assemble_oderhs(rs, sts; combinatoric_ratelaws=true, remove_conserved=f
             drop_dynamics(spec) && continue
 
             # convert constant species in stoichiometry to parameters
-            (stoich isa Symbolics.Symbolic) && (stoich = substitute(stoich, csts_submap))
+            if hasconststs && (stoich isa Symbolics.Symbolic)
+                stoich = substitute(stoich, csts_submap)
+            end
 
             i = species_to_idx[spec]
             if _iszero(rhsvec[i])
@@ -782,10 +799,23 @@ function assemble_diffusion(rs, sts, noise_scaling; combinatoric_ratelaws=true,
         Dict()
     end
 
+    # setup substitution map to turn constant states to parameters
+    hasconststs = any(isconstant, get_states(rs))
+    csts_submap = if hasconststs
+        csts = filter(isconstant, get_states(rs))
+        Dict(p[1] => p[2] for p in zip(csts, map(MT.toparam, csts)))
+    else
+        Dict()
+    end
+
+    # NOTE, order matters here: we keep the constant species to parameter mapping and not
+    # the conservation law substitution with this order
+    submap = merge(depspec_submap, csts_submap)
+
     for (j,rx) in enumerate(get_eqs(rs))
         rlsqrt = sqrt(abs(oderatelaw(rx; combinatoric_ratelaw=combinatoric_ratelaws)))
         (noise_scaling!==nothing) && (rlsqrt *= noise_scaling[j])
-        remove_conserved && (rlsqrt = substitute(rlsqrt, depspec_submap))
+        (hasconststs || remove_conserved) && (rlsqrt = substitute(rlsqrt, submap))
 
         for (spec,stoich) in rx.netstoich
             # dependent species don't get an equation
@@ -796,6 +826,8 @@ function assemble_diffusion(rs, sts, noise_scaling; combinatoric_ratelaws=true,
 
             i = species_to_idx[spec]
             if stoich isa Symbolics.Symbolic
+                # convert constant species in stoichiometry to parameters
+                hasconststs && (stoich = substitute(stoich, csts_submap))
                 eqs[i,j] = stoich * rlsqrt
             else
                 signedrlsqrt = (stoich > zero(stoich)) ? rlsqrt : -rlsqrt
@@ -906,6 +938,7 @@ end
     @inbounds for (i,spec) in enumerate(substrates)
         # move constant species into the rate
         if isconstant(spec)
+            spec = MT.toparam(spec)
             rate *= spec
             isone(substoich[i]) && continue
             for i = 1:(substoich[i]-1)
@@ -935,6 +968,15 @@ function assemble_jumps(rs; combinatoric_ratelaws=true)
     stateset = Set(get_states(rs))
     rxvars = []
 
+    # setup substitution map to turn constant states to parameters
+    hasconststs = any(isconstant, get_states(rs))
+    csts_submap = if hasconststs
+        csts = filter(isconstant, get_states(rs))
+        Dict(p[1] => p[2] for p in zip(csts, map(MT.toparam, csts)))
+    else
+        Dict()
+    end
+
     isempty(get_eqs(rs)) && error("Must give at least one reaction before constructing a JumpSystem.")
     for rx in get_eqs(rs)
         empty!(rxvars)
@@ -950,8 +992,13 @@ function assemble_jumps(rs; combinatoric_ratelaws=true)
             push!(meqs, makemajump(rx, combinatoric_ratelaw=combinatoric_ratelaws))
         else
             rl = jumpratelaw(rx, combinatoric_ratelaw=combinatoric_ratelaws)
+            hasconststs && (rl = substitute(rl, csts_submap))
+
             affect = Vector{Equation}()
             for (spec,stoich) in rx.netstoich
+                # change constant states in stoich to parameters
+                hasconststs && (stoich = substitute(stoich, csts_submap))
+
                 # don't change species that are constant or BCs
                 (!drop_dynamics(spec)) && push!(affect, spec ~ spec + stoich)
             end
@@ -989,23 +1036,46 @@ end
 # end
 
 function merge_const_sts(ps, sts)
-    cps = map(MT.toparam, filter(isconstant, sts))
+    cps = map(MT.toparam, Iterators.filter(isconstant, sts))
     vcat(ps, cps)
+end
+
+# Go through the equation replacing variables corresponding to constant species with
+# parameters.
+function conststs_to_pars(eq::Equation, csts_submap)
+    rhs = substitute(eq.rhs, csts_submap)
+    lhs = substitute(eq.lhs, csts_submap)
+    (lhs ~ rhs)
+end
+
+function conststs_to_pars!(eqs::AbstractVector{Equation}, submap)
+    map!(Base.Fix2(conststs_to_pars, submap), eqs)
+end
+
+# Go through the defaults dictionary and remove variables that are constant species
+# replacing with parameters. Makes sure to substitute into their values too (if the values
+# are symbolic).
+function conststs_to_pars!(d::Dict, submap)
+    for(cst,cp) in submap
+        if haskey(d, cst)
+            v = d[cst]
+            delete!(d, cst)
+            (v isa Symbolics.Symbolic) && (v = substitute(v, submap))
+            d[cp] = v
+        end
+    end
 end
 
 # merge constraint components with the ReactionSystem components
 # also handles removing BC and constant species
-function addconstraints!(eqs, rs::ReactionSystem, ists; remove_conserved=false)
+function addconstraints!(eqs, rs::ReactionSystem, ists, csts_submap=Dict(); remove_conserved=false)
     # if there are non-constant BC species, put them after the independent species
     rssts = get_states(rs)
     sts = any(ispurebc, rssts) ? vcat(ists, filter(ispurebc, rssts)) : ists
 
     # if there are constant species, make them parameters
-    ps = if any(isconstant, get_states(rs))
-        merge_const_sts(get_ps(rs), get_states(rs))
-    else
-        get_ps(rs)
-    end
+    hasconststs = !isempty(csts_submap)
+    ps = hasconststs ? vcat(get_ps(rs), values(csts_submap)) : get_ps(rs)
 
     # make dependent species observables and add conservation constants as parameters
     if remove_conserved
@@ -1026,6 +1096,17 @@ function addconstraints!(eqs, rs::ReactionSystem, ists; remove_conserved=false)
         obs = MT.observed(rs)
     end
 
+    # make constant states into parameters in obs/defs
+    if hasconststs
+        # make sure we are using a copy of the obs/defs
+        if !remove_conserved
+            obs  = copy(obs)
+            defs = copy(defs)
+        end
+        conststs_to_pars!(obs, csts_submap)
+        conststs_to_pars!(defs, csts_submap)
+    end
+
     csys = get_constraints(rs)
     if csys !== nothing
         if remove_conserved
@@ -1038,7 +1119,7 @@ function addconstraints!(eqs, rs::ReactionSystem, ists; remove_conserved=false)
                   """
         end
         # merge in states of csys that aren't constant
-        sts = unique!(vcat(sts, filter(ispurebc, get_states(csys))))
+        sts = unique!(vcat(sts, filter(!isconstant, get_states(csys))))
 
         # merge constant species that are only in the constraints into parameters
         ps = vcat(ps, get_ps(csys))
@@ -1092,10 +1173,14 @@ function Base.convert(::Type{<:ODESystem}, rs::ReactionSystem;
                       include_zero_odes=true, remove_conserved=false, checks=false, kwargs...)
     fullrs = Catalyst.flatten(rs)
     remove_conserved && conservationlaws(fullrs)
+
+    # we need to figure out the non-const and non-bc states
     ists = get_indep_sts(fullrs, remove_conserved)
+    hasconststs, csts_submap = get_const_sts(fullrs)
+
     eqs = assemble_drift(fullrs, ists; combinatoric_ratelaws, remove_conserved,
                                       include_zero_odes)
-    eqs,sts,ps,obs,defs = addconstraints!(eqs, fullrs, ists; remove_conserved)
+    eqs,sts,ps,obs,defs = addconstraints!(eqs, fullrs, ists, csts_submap; remove_conserved)
     csys = get_constraints(fullrs)
     continuous_events = (csys === nothing) ? nothing : MT.get_continuous_events(csys)
     ODESystem(eqs, get_iv(fullrs), sts, ps; name, defaults=defs, observed=obs,
