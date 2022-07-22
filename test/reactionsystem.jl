@@ -545,3 +545,13 @@ let
     @test_throws ErrorException ReactionSystem([rx], t; name = :rs)
     @named rs = ReactionSystem([rx], t; balanced_bc_check = false)
 end
+
+let
+    rn = @reaction_network begin
+        t, A --> B
+        1.0, B --> D
+    end
+    jsys = convert(JumpSystem, rn)
+    jumps = Catalyst.assemble_jumps(rn)
+    @test count(j -> j isa VariableRateJump, jumps) == 2
+end
