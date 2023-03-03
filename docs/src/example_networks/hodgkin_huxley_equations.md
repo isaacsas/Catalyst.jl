@@ -18,10 +18,17 @@ end
 βₙ(V) = .125 * exp(-(V + 70)/80)
 
 function Kchannel(; name, V)
+    # reaction model for gating variable dynamics
+    gatingrxs = @reaction_network $name begin
+	    (αₙ($V),βₙ($V)), n′ <--> n
+    end
+
+    # equation for K current
 	@parameters ḡK = 36.0 EK = -82.0
-    openrx = @reaction αₙ($V), n′ --> n
-    closerx = @reaction βₙ($V), n --> n′
-    Iₖ = ḡK * n^4 * (V - EK)
+    @unpack n = rxs
+    Iₖ ~ ḡK * n^4 * (V - EK)
+    @named current = ODESystem([Iₖ], t)
+    extend(current, gatingrxs)
 end
 
 function αₘ(V)
