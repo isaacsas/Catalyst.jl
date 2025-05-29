@@ -264,3 +264,40 @@ let
     @test eltype(jsol[:X1]) == eltype(jsol[:X2]) == typeof(jprob[:X1]) == typeof(jprob[:X2]) == Int32
     @test eltype(jsol.t) == typeof(jprob.prob.tspan[1]) == typeof(jprob.prob.tspan[2]) == Float64
 end
+
+# time-dependent gene expression model from Thanh and Priami, J. Chem. Phys., 2015
+let
+    rn = @reaction_network gene_model begin
+        @parameters begin
+            r[1:10] = [0.043, 0.0007, 0.0715, 0.0039, 0.0199, 0.4791, 0.00019, 0.8765, 0.083, 0.5]
+            k = -log(2) / 30
+        end
+        r[1], RNA --> RNA + M
+        r[2], M --> ∅
+        r[3], DNAD --> RNA + DNAD
+        r[4], RNA --> 0
+        r[5] * exp(k*t), DNA + D --> DNAD
+        r[6], DNAD --> DNA + D
+        r[7] * exp(k*t), DNAD + D --> DNA2D  
+        r[8], DNA2D --> DNA + D
+        r[9] * exp(k*t), 2M --> D
+        r[10], D --> 2M
+    end
+    u0 = [:DNA => 10, :M => 10, :D => 30, :RNA => 0, :DNAD => 0, :DNA2D => 0]
+    jinputs = JumpInputs(rn, u0, (0.0, 120.0); save_positions = (false, false))
+    jprob = JumpProblem(jinputs; rng, save_positions = (false, false))
+    Nsims = 1600
+    tsave = range(0.0, 120.0, length = 121)
+    Mmean = zeros(length(tsave))
+    Dmean = zeros(length(tsave))
+    for n in 1:Nsims
+        sol = solve(jprob, Tsit5(); saveat = 1.0)
+        Mmean .+= sol[:M]
+        Dmean .+= sol[:D]
+    end
+    Mmean ./= Nsims
+    Dmean ./= Nsims
+    # p1 = plot(tsave, Mmean; label = "M mean", xlabel = "time")
+    # p2 = plot(tsave, Dmean; label = "D mean", xlabel = "time")
+    # plot(p1, p2; layout = (2, 1))
+end
