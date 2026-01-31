@@ -1219,14 +1219,10 @@ function JumpProcesses.JumpProblem(rs::ReactionSystem, u0, tspan,
     # Pure jump system - use HybridProblem for hybrid ODE+SDE+Jump systems.
     jsys = complete(make_sck_jump(rs; name, combinatoric_ratelaws, checks,
         expand_catalyst_funs, save_positions))
-    # Convert Symbol keys to Symbolic keys since MTK's callback compilation
-    # (specifically compile_equational_affect) requires Symbolic keys.
-    u0_sym = symmap_to_varmap(jsys, u0)
     op = if p isa DiffEqBase.NullParameters
-        u0_sym
+        u0
     else
-        p_sym = symmap_to_varmap(jsys, p)
-        merge(Dict(u0_sym), Dict(p_sym))
+        merge(Dict(u0), Dict(p))
     end
     return JumpProblem(jsys, op, tspan; save_positions, kwargs...)
 end
@@ -1327,13 +1323,8 @@ function HybridProblem(rs::ReactionSystem, u0, tspan,
 
     if has_jump
         # Any jumps present → JumpProblem
-        # Need symmap_to_varmap for events - callback compilation requires Symbolic keys.
-        # MTKBase bug: compile_equational_affect creates ImplicitDiscreteProblem(affsys, op)
-        # where affsys is a different system than the main sys. Symbol keys in op can't be
-        # converted because they're looked up in affsys's symbol table, not sys's.
         sys = complete(sys)
-        prob_cond_sym = symmap_to_varmap(sys, prob_cond)
-        return JumpProblem(sys, prob_cond_sym, tspan; save_positions, kwargs...)
+        return JumpProblem(sys, prob_cond, tspan; save_positions, kwargs...)
 
     elseif has_sde
         # SDE (with or without ODE) → SDEProblem
